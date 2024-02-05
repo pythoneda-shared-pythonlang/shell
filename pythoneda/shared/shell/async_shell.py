@@ -25,7 +25,7 @@ from pythoneda import attribute, BaseObject
 import shlex
 import subprocess
 import tempfile
-from typing import List
+from typing import Dict, List, Tuple
 
 
 class AsyncShell(BaseObject):
@@ -74,51 +74,126 @@ class AsyncShell(BaseObject):
         """
         return self._folder
 
-    async def run_in_a_temporary_folder(self):
+    async def run_in_a_temporary_folder(
+        self, communicate: bool = True, env: Dict = None, charset: str = "utf-8", **kwds
+    ) -> Tuple[asyncio.subprocess.Process, str, str]:
         """
         Runs the arguments in a temporary folder.
-        :return: The process instance (with return code, stdout and stderr)
-        :rtype: process
+        :param communicate: Whether to communicate with the process or not.
+        :type communicate: bool
+        :param env: The environment to use.
+        :rtype env: Dict
+        :param charset: The charset to decode the stdout and stderr (if 'communicate' is True).
+        :rtype charset: str
+        :param kwds: Additional keywords.
+        :type kwds: Dict
+        :return: The tuple (asyncio.subprocess.Process, stdout, stderr).
+        :rtype: Tuple[asyncio.subprocess.Process, str, str]
         """
         with tempfile.TemporaryDirectory() as tmp_folder:
-            result = await self._run_in(tmp_folder)
+            result = await self._run_in(
+                self.args, communicate, tmp_folder, env, charset, **kwds
+            )
 
         return result
 
-    async def _run_in(self, folder: str):
-        """
-        Runs the arguments in given folder.
-        :param folder: The folder to run the args in.
-        :type folder: str
-        :return: The process instance (with return code, stdout and stderr)
-        :rtype: process
-        """
-        escaped_args = [shlex.quote(arg) for arg in self.args]
-        result = await asyncio.create_subprocess_shell(
-            " ".join(escaped_args),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=folder,
-            bufsize=0,
-            universal_newlines=False,
-            env={"PATH": os.environ["PATH"]},
-        )
-
-        await result.communicate()
-
-        return result
-
-    async def run(self):
+    async def run(
+        self, communicate: bool = True, env: Dict = None, charset: str = "utf-8", **kwds
+    ) -> Tuple[asyncio.subprocess.Process, str, str]:
         """
         Runs the shell.
-        :return: The process instance (with return code, stdout and stderr)
-        :rtype: process
+        :param communicate: Whether to communicate with the process or not.
+        :type communicate: bool
+        :param env: The environment to use.
+        :rtype env: Dict
+        :param charset: The charset to decode the stdout and stderr (if 'communicate' is True).
+        :rtype charset: str
+        :param kwds: Additional keywords.
+        :type kwds: Dict
+        :return: The tuple (asyncio.subprocess.Process, stdout, stderr).
+        :rtype: Tuple[asyncio.subprocess.Process, str, str]
         """
         if self.folder:
-            result = await self._run_in(self.folder)
+            result = await self._run_in(
+                self.args,
+                self.folder,
+                communicate,
+                env,
+                charset,
+                bufsize,
+                universal_newlines,
+                **kwds
+            )
         else:
-            result = await self._run_in_temporary_folder()
+            result = await self._run_in_temporary_folder(
+                self.args,
+                communicate,
+                env,
+                charset,
+                bufsize,
+                universal_newlines,
+                **kwds
+            )
+
         return result
+
+    async def _run_in(
+        self,
+        args: List[str],
+        folder: str,
+        communicate: bool = True,
+        env: Dict = None,
+        charset: str = "utf-8",
+        **kwds
+    ) -> Tuple[asyncio.subprocess.Process, str, str]:
+        """
+        Runs the arguments in given folder.
+        :param args: The command-line arguments.
+        :type args: List[str]
+        :param folder: The folder to run the args in.
+        :type folder: str
+        :param communicate: Whether to communicate with the process or not.
+        :type communicate: bool
+        :param env: The environment to use.
+        :type env: Dict
+        :param charset: The charset to decode the stdout and stderr (if 'communicate' is True).
+        :type charset: str
+        :param kwds: Additional keywords.
+        :type kwds: Dict
+        :return: The tuple (asyncio.subprocess.Process, stdout, stderr).
+        :rtype: Tuple[asyncio.subprocess.Process, str, str]
+        """
+        if env is None:
+            env = {"PATH": os.environ["PATH"]}
+
+        merged_keywords = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "cwd": folder,
+            "env": env,
+        }
+
+        merged_keywords.update(kwds)
+
+        if merged_keywords.get("bufsize", None) is None:
+            merged_keywords["bufsize"] = 0
+        if merged_keywords.get("universal_newlines", None) is None:
+            merged_keywords["universal_newlines"] = False
+
+        escaped_args = [shlex.quote(arg) for arg in args]
+        process = await asyncio.create_subprocess_shell(
+            " ".join(escaped_args), **merged_keywords
+        )
+
+        if communicate:
+            stdout, stderr = await process.communicate()
+            stdout = stdout.decode(charset)
+            stderr = stderr.decode(charset)
+        else:
+            stdout = None
+            stderr = None
+
+        return (process, stdout, stderr)
 
 
 # vim: syntax=python ts=4 sw=4 sts=4 tw=79 sr et
