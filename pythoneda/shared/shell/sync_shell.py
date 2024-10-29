@@ -20,13 +20,14 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 import os
-from pythoneda import attribute, BaseObject
+from pathlib import Path
+from pythoneda.shared import attribute, BaseObject
 import subprocess
 import tempfile
-from typing import List
+from typing import Dict, List
 
 
-class AsyncShell(BaseObject):
+class SyncShell(BaseObject):
 
     """
     Represents a synchronous shell.
@@ -83,14 +84,26 @@ class AsyncShell(BaseObject):
 
         return result
 
-    def _run_in(self, folder: str):
+    def _run_in(self, folder: str, env: Dict = None) -> subprocess.CompletedProcess:
         """
         Runs the arguments in given folder.
         :param folder: The folder to run the args in.
         :type folder: str
         :return: The process instance (with return code, stdout and stderr)
-        :rtype: process
+        :rtype: subprocess.CompletedProcess
         """
+        if env is None:
+            env = {
+                "PATH": os.environ.get("PATH", None),
+                "TMPDIR": os.environ.get("TMPDIR", None),
+            }
+
+        cleanup_after = False
+        temp_folder = env.get("TMPDIR", None)
+        if temp_folder and not os.path.exists(temp_folder):
+            cleanup_after = True
+            Path(temp_folder).mkdir()
+
         result = subprocess.run(
             args,
             check=False,
@@ -98,8 +111,11 @@ class AsyncShell(BaseObject):
             stderr=subprocess.PIPE,
             text=True,
             cwd=folder,
-            env={"PATH": os.environ["PATH"]},
+            env=env,
         )
+
+        if cleanup_after:
+            Path(temp_folder).rmdir()
 
         return result
 

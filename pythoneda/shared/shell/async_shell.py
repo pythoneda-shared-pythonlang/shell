@@ -21,7 +21,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 import asyncio
 import os
-from pythoneda import attribute, BaseObject
+from pathlib import Path
+from pythoneda.shared import attribute, BaseObject
 import shlex
 import subprocess
 import tempfile
@@ -92,7 +93,7 @@ class AsyncShell(BaseObject):
         """
         with tempfile.TemporaryDirectory() as tmp_folder:
             result = await self._run_in(
-                self.args, communicate, tmp_folder, env, charset, **kwds
+                self.args, tmp_folder, communicate, env, charset, **kwds
             )
 
         return result
@@ -115,24 +116,11 @@ class AsyncShell(BaseObject):
         """
         if self.folder:
             result = await self._run_in(
-                self.args,
-                self.folder,
-                communicate,
-                env,
-                charset,
-                bufsize,
-                universal_newlines,
-                **kwds
+                self.args, self.folder, communicate, env, charset, **kwds
             )
         else:
-            result = await self._run_in_temporary_folder(
-                self.args,
-                communicate,
-                env,
-                charset,
-                bufsize,
-                universal_newlines,
-                **kwds
+            result = await self.run_in_a_temporary_folder(
+                communicate, env, charset, **kwds
             )
 
         return result
@@ -144,7 +132,7 @@ class AsyncShell(BaseObject):
         communicate: bool = True,
         env: Dict = None,
         charset: str = "utf-8",
-        **kwds
+        **kwds,
     ) -> Tuple[asyncio.subprocess.Process, str, str]:
         """
         Runs the arguments in given folder.
@@ -164,7 +152,16 @@ class AsyncShell(BaseObject):
         :rtype: Tuple[asyncio.subprocess.Process, str, str]
         """
         if env is None:
-            env = {"PATH": os.environ["PATH"]}
+            env = {
+                "PATH": os.environ.get("PATH", None),
+                "TMPDIR": os.environ.get("TMPDIR", None),
+            }
+
+        cleanup_after = False
+        temp_folder = env.get("TMPDIR", None)
+        if temp_folder and not os.path.exists(temp_folder):
+            cleanup_after = True
+            Path(temp_folder).mkdir()
 
         merged_keywords = {
             "stdout": subprocess.PIPE,
@@ -180,7 +177,7 @@ class AsyncShell(BaseObject):
         if merged_keywords.get("universal_newlines", None) is None:
             merged_keywords["universal_newlines"] = False
 
-        escaped_args = [shlex.quote(arg) for arg in args]
+        escaped_args = [shlex.quote(str(arg)) for arg in args]
         process = await asyncio.create_subprocess_shell(
             " ".join(escaped_args), **merged_keywords
         )
@@ -192,6 +189,9 @@ class AsyncShell(BaseObject):
         else:
             stdout = None
             stderr = None
+
+        if cleanup_after:
+            Path(temp_folder).rmdir()
 
         return (process, stdout, stderr)
 
